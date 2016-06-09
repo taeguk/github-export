@@ -33,21 +33,6 @@ class GithubRepository(object):
         self.owner = owner
         self.visibility = visibility
 
-"""
-class ShellCommandException(Exception):
-    def __init__(self, command):
-        self.command = command
-    
-    def __str__(self):
-        return repr(self.command)
-
-def execute_shell_command(cmd):
-    child = subprocess.Popen(cmd, shell=True)
-    child.communicate()
-    if child.returncode != 0:
-        raise ShellCommandException(cmd)
-"""
-
 def make_and_chdir(dir_name):
     if not os.path.exists(dir_name):
         os.makedirs(dir_name)
@@ -87,7 +72,6 @@ class GithubBackup(object):
             
         return repo_list
 
-
     def backup_repo(self, repo):
         old_directory = os.getcwd()
         try:
@@ -126,7 +110,7 @@ class GithubBackup(object):
         if os.path.exists(backup_name):
             print('[!] {0} already exists!'.format(backup_name))
             self.backup_failure_handler()
-            return False
+            raise ValueError('{0} already exists!'.format(backup_name))
 
         make_and_chdir(backup_name)
         for repo in repo_list:
@@ -134,10 +118,9 @@ class GithubBackup(object):
             stime = time.time()
             try:
                 self.backup_repo(repo)
-            except ShellCommandException as e:
-                print('[!] A unknown error occurs when executing "{0}"'.format(e.cmd))
+            except:
                 self.backup_failure_handler()
-                return False
+                raise
 
             gap_time = time.time() - stime
             print('[I] Progress time to backup {0}/{1} : {2:.4f} sec.'.
@@ -150,10 +133,19 @@ class GithubBackup(object):
 
         if compress:
             print('[*] Start to compress!')
-            import tarfile
-            with tarfile.open(backup_name + '.tar.gz', 'w:gz') as tar:
-                for name in os.listdir(backup_name):
-                    tar.add(backup_name + '/' + name)
+            compress_name = backup_name + '.tar.gz'
+            try:
+                import tarfile
+                with tarfile.open(compress_name, 'w:gz') as tar:
+                    for name in os.listdir(backup_name):
+                        tar.add(backup_name + '/' + name)
+            except:
+                if os.path.exists(compress_name):
+                    import shutil
+                    shutil.rmtree(compress_name, ignore_errors=False)
+                raise
+            import shutil
+            shutil.rmtree(backup_name, ignore_errors=False)
             print('[*] Finish to compress!\n')
 
         backup_gap_time = time.time() - self.backup_stime
