@@ -17,7 +17,7 @@ with open(path.join(here, 'README.rst'), encoding='utf-8') as f:
 
 setup (
     name = 'github-export',
-    version = '0.0.2',
+    version = '0.0.3',
 
     author = 'taeguk',
     author_email = 'xornrbboy@gmail.com',
