@@ -43,12 +43,12 @@ class GithubBackup(object):
         self.account = account
     
     def get_repo_list(self):
-        base_url = 'https://api.github.com/user/repos'
+        base_url = 'https://api.github.com/user/repos?'
         page = 1
         repo_list = []
 
         while True:
-            url = base_url + '?page=' + str(page)
+            url = base_url + '&page=' + str(page)
             r = requests.get(url,
                 auth = (self.account.username, self.account.password))
             
@@ -78,7 +78,11 @@ class GithubBackup(object):
             make_and_chdir(repo.owner)
             make_and_chdir(repo.visibility)
             try:
-                git.Git().clone(repo.url)
+                print('[*] cloning {0}/{1}'.format(repo.owner, repo.name))
+                git.Git().clone('https://{0}:{1}@github.com/{2}/{3}'.
+                    format(self.account.username, self.account.password, 
+                        repo.owner, repo.name))
+                print('[*] fetching {0}/{1}'.format(repo.owner, repo.name))
                 git.Repo(repo.name).remotes.origin.fetch()
             except:
                 if os.path.exists(repo.name):
@@ -114,7 +118,7 @@ class GithubBackup(object):
 
         make_and_chdir(backup_name)
         for repo in repo_list:
-            print('[*] Backup-ing {0}/{1}...'.format(repo.owner, repo.name))
+            print('[*] Start to backup {0}/{1}...'.format(repo.owner, repo.name))
             stime = time.time()
             try:
                 self.backup_repo(repo)
@@ -127,7 +131,7 @@ class GithubBackup(object):
                 format(repo.owner, repo.name, gap_time))
             print('[*] Success to backup {0}/{1}!\n'.format(repo.owner, repo.name))
         
-        print('[*] Finish to backup!\n')
+        print('[*] Success to backup all repositories!\n')
         
         os.chdir(self.backup_dir)
 
@@ -146,14 +150,12 @@ class GithubBackup(object):
                 raise
             import shutil
             shutil.rmtree(backup_name, ignore_errors=False)
-            print('[*] Finish to compress!\n')
+            print('[*] Success to compress!\n')
 
         backup_gap_time = time.time() - self.backup_stime
         print('[I] All progress time : {0:.4f} sec.'.format(backup_gap_time))
         print('[*] All progress was finished successfully!')
         
-        return True
-
 def usage():
     print("""Usage: {0} [Options]
 Options:
