@@ -13,7 +13,7 @@ import git
 import xml.etree.ElementTree as ET
 import re
 
-VERSION = '0.1.0'
+VERSION = '0.1.1'
 
 def xml_indent(elem, level=0):
     i = "\n" + level*"  "
@@ -146,7 +146,7 @@ class GithubRepository(object):
                 body = json_data['body']
                 created_at = json_data['created_at']
                 updated_at = json_data['updated_at']
-                issue_no = json_data['issue_url'].split('/')[-1]
+                issue_no = int(json_data['issue_url'].split('/')[-1])
 
                 comment = GithubComment(issue_no, writer, body, created_at, updated_at)
                 comments.append(comment)
