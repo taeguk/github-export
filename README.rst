@@ -30,6 +30,7 @@ Feature Support
 --------------------
 
 - Repository (public/private, owner/collaborator/organization)
+- Repository's issues
 - ...If you have things you want, please tell me through issues_.
 
 .. _issues: https://github.com/taeguk/github-export/issues
