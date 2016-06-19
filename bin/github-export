@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 #-*- coding: utf-8 -*-
 
@@ -10,6 +10,25 @@ import time
 import getpass
 import requests
 import git
+import xml.etree.ElementTree as ET
+import re
+
+VERSION = '0.1.0'
+
+def xml_indent(elem, level=0):
+    i = "\n" + level*"  "
+    if len(elem):
+        if not elem.text or not elem.text.strip():
+            elem.text = i + "  "
+        if not elem.tail or not elem.tail.strip():
+            elem.tail = i
+        for elem in elem:
+            xml_indent(elem, level+1)
+        if not elem.tail or not elem.tail.strip():
+            elem.tail = i
+    else:
+        if level and (not elem.tail or not elem.tail.strip()):
+            elem.tail = i
 
 class GithubAccount(object):
     def __init__(self, username, password):
@@ -26,12 +45,180 @@ class GithubAccount(object):
             return False
         return True
 
+class GithubComment(object):
+    def __init__(self, issue_no, writer, body, created_at, updated_at):
+        self.issue_no = issue_no
+        self.writer = writer
+        self.body = body
+        self.created_at = created_at
+        self.updated_at = updated_at
+    
+    def export_xml(self):
+        comment_xml = ET.Element('Comment')
+        ET.SubElement(comment_xml, 'writer').text = self.writer
+        ET.SubElement(comment_xml, 'body').text = self.body
+        ET.SubElement(comment_xml, 'created_at').text = self.created_at
+        ET.SubElement(comment_xml, 'updated_at').text = self.updated_at
+        return comment_xml
+
+class GithubIssue(object):
+    def __init__(self, no, writer, title, body, state, created_at, updated_at, closed_at):
+        self.no = no
+        self.writer = writer
+        self.title = title
+        self.body = body
+        self.state = state
+        self.created_at = created_at
+        self.updated_at = updated_at
+        self.closed_at = closed_at
+        self.milestone = None
+        self.labels = []
+        self.comments = []
+
+    def add_label(self, label):
+        self.labels.append(label)
+
+    def add_comment(self, comment):
+        self.comments.append(comment)
+
+    def export_xml(self):
+        issue_xml = ET.Element('Issue', no=str(self.no))
+
+        ET.SubElement(issue_xml, 'writer').text = self.writer
+        ET.SubElement(issue_xml, 'title').text = self.title
+        ET.SubElement(issue_xml, 'body').text = self.body
+        ET.SubElement(issue_xml, 'state').text = self.state
+        ET.SubElement(issue_xml, 'created_at').text = self.created_at
+        ET.SubElement(issue_xml, 'updated_at').text = self.updated_at
+        ET.SubElement(issue_xml, 'closed_at').text = self.closed_at
+        ET.SubElement(issue_xml, 'milestone').text = self.milestone
+
+        labels_xml = ET.Element('LabelList')
+        for label in self.labels:
+            ET.SubElement(labels_xml, 'label').text = label
+        issue_xml.append(labels_xml)
+
+        comments_xml = ET.Element('CommentList')
+        for comment in self.comments:
+            comment_xml = comment.export_xml()
+            comments_xml.append(comment_xml)
+        issue_xml.append(comments_xml)
+
+        return issue_xml
+
 class GithubRepository(object):
     def __init__(self, name, url, owner, visibility):
         self.name = name
         self.url = url
         self.owner = owner
         self.visibility = visibility
+        self.issues = []
+
+    def add_issue(self, issue):
+        self.issues.append(issue)
+
+    def get_comment_list(self, account):
+        base_url = 'https://api.github.com/repos/{0}/{1}/issues/comments?'.format(
+                    self.owner, self.name)
+        page = 1
+        page_flag = True
+        comments = []
+
+        while page_flag:
+            url = base_url + '&page=' + str(page)
+            r = requests.get(url,
+                auth = (account.username, account.password))
+
+            page_flag = False
+            header_link = r.headers.get('Link')
+            if header_link is not None:
+                rels = header_link.split(';')[1::2]
+                for rel in rels:
+                    rel = rel.strip()
+                    if rel == 'rel="next"':
+                        page_flag = True
+                        break
+            
+            json_data_list = r.json()
+
+            for json_data in json_data_list:
+                writer = json_data['user']['login']
+                body = json_data['body']
+                created_at = json_data['created_at']
+                updated_at = json_data['updated_at']
+                issue_no = json_data['issue_url'].split('/')[-1]
+
+                comment = GithubComment(issue_no, writer, body, created_at, updated_at)
+                comments.append(comment)
+
+            page += 1
+
+        return comments
+
+    def update_issue_list(self, account):
+        base_url = "https://api.github.com/repos/{0}/{1}/issues?state=all".format(
+                    self.owner, self.name)
+        page = 1
+        page_flag = True
+        
+        comments = self.get_comment_list(account)
+        
+        while page_flag:
+            url = base_url + '&page=' + str(page)
+            r = requests.get(url,
+                auth = (account.username, account.password))
+            
+            page_flag = False
+            header_link = r.headers.get('Link')
+            if header_link is not None:
+                rels = header_link.split(';')[1::2]
+                for rel in rels:
+                    rel = rel.strip()
+                    if rel == 'rel="next"':
+                        page_flag = True
+                        break
+
+            json_data_list = r.json()
+
+            for json_data in json_data_list:
+                no = json_data['number']
+                writer = json_data['user']['login']
+                title = json_data['title']
+                body = json_data['body']
+                state = json_data['state']
+                created_at = json_data['created_at']
+                updated_at = json_data['updated_at']
+                closed_at = json_data['closed_at']
+                issue = GithubIssue(no, writer, title, body, state, created_at, updated_at, closed_at)
+
+                if json_data['milestone'] is not None:
+                    issue.milestone = json_data['milestone']['title']
+                if json_data['labels'] is not None:
+                    for json_label in json_data['labels']:
+                        issue.add_label(json_label['name'])
+
+                match_comments = [x for x in comments if x.issue_no == no]
+                for match_comment in match_comments:
+                    issue.add_comment(match_comment)
+
+                self.add_issue(issue)
+
+            page += 1
+
+    def export_xml(self):
+        repo_xml = ET.Element('Repository')
+
+        ET.SubElement(repo_xml, 'name').text = self.name
+        ET.SubElement(repo_xml, 'owner').text = self.owner
+        ET.SubElement(repo_xml, 'visibility').text = self.visibility
+
+        issues_xml = ET.Element('IssueList')
+        for issue in self.issues:
+            issue_xml = issue.export_xml()
+            issues_xml.append(issue_xml)
+        repo_xml.append(issues_xml)
+
+        return repo_xml
 
 def make_and_chdir(dir_name):
     if not os.path.exists(dir_name):
@@ -41,20 +228,29 @@ def make_and_chdir(dir_name):
 class GithubBackup(object):
     def __init__(self, account):
         self.account = account
-    
+
     def get_repo_list(self):
         base_url = 'https://api.github.com/user/repos?'
         page = 1
+        page_flag = True
         repo_list = []
 
-        while True:
+        while page_flag:
             url = base_url + '&page=' + str(page)
             r = requests.get(url,
                 auth = (self.account.username, self.account.password))
             
+            page_flag = False
+            header_link = r.headers.get('Link')
+            if header_link is not None:
+                rels = re.split(';|,', header_link)[1::2]
+                for rel in rels:
+                    rel = rel.strip()
+                    if rel == 'rel="next"':
+                        page_flag = True
+                        break
+            
             json_data_list = r.json()
-            if len(json_data_list) == 0:
-                break
 
             for json_data in json_data_list:
                 repo_name = json_data['name']
@@ -66,7 +262,9 @@ class GithubBackup(object):
                 else:
                     visibility = 'public'
                 repo = GithubRepository(repo_name, repo_url, owner, visibility)
+                repo.update_issue_list(self.account)
                 repo_list.append(repo)
+                print('{0}...'.format(repo.name))
 
             page += 1
             
@@ -77,6 +275,16 @@ class GithubBackup(object):
         try:
             make_and_chdir(repo.owner)
             make_and_chdir(repo.visibility)
+
+            # make a xml file about repo.
+            encoding_type = 'utf-8'
+            repo_xml = repo.export_xml()
+            repo_xml.attrib['xml_version'] = VERSION
+            repo_xml.attrib['encoding'] = encoding_type
+            xml_indent(repo_xml)
+            ET.ElementTree(repo_xml).write('{0}.xml'.format(repo.name), encoding=encoding_type)
+
+            # clone repo.
             try:
                 print('[*] cloning {0}/{1}'.format(repo.owner, repo.name))
                 git.Git().clone('https://{0}:{1}@github.com/{2}/{3}'.
@@ -100,6 +308,13 @@ class GithubBackup(object):
     def backup(self, backup_name, compress):
         self.backup_dir = os.getcwd()
         self.backup_stime = time.time()
+
+        print()
+
+        if os.path.exists(backup_name):
+            print('[!] {0} already exists!'.format(backup_name))
+            self.backup_failure_handler()
+            raise ValueError('{0} already exists!'.format(backup_name))
 
         print('[*] Get your repositories informations...')
         stime = time.time()
@@ -193,10 +408,10 @@ def main():
             sys.exit(1)
 
     if username is None:
-        username = input('Input your github username : ')
+        username = input('Enter your github username : ')
 
     if password is None:
-        password = getpass.getpass(prompt='Input your github password : ')
+        password = getpass.getpass(prompt='Enter github password for user \'{0}\': '.format(username))
 
     account = GithubAccount(username, password)
     GithubBackup(account).backup(backup_name = output, compress = compress)
